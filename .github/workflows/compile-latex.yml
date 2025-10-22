@@ -1,12 +1,14 @@
-name: Compile LaTeX Document
+name: Compile LaTeX Documents
+
+permissions:
+  contents: write  # This allows the action to push changes back
 
 on:
   push:
     branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -16,59 +18,47 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
-        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0  # Get full history for version numbers
     
-    - name: Get commit hash
+    - name: Get commit info
       id: commit
       run: |
-        SHORT_HASH=$(git rev-parse --short HEAD)
-        echo "short_hash=$SHORT_HASH" >> $GITHUB_OUTPUT
-        echo "Commit hash: $SHORT_HASH"
+        echo "short_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "count=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
     
-    - name: Update prologue.tex with commit hash
-      run: |
-        sed -i "s/GIT_HASH_HERE/${{ steps.commit.outputs.short_hash }}/g" 2025F_SSW590_11/prologue.tex
-        echo "Updated prologue.tex with commit hash"
-        cat 2025F_SSW590_11/prologue.tex | grep "Version:"
+    - name: Create builds directory
+      run: mkdir -p builds
     
     - name: Compile LaTeX document
       uses: xu-cheng/latex-action@v3
       with:
         root_file: itManual.tex
-        working_directory: 2025F_SSW590_11
-        latexmk_use_xelatex: false
-        args: -pdf -interaction=nonstopmode -file-line-error
-        continue_on_error: true
+        working_directory: .
+        args: -pdf -file-line-error -interaction=nonstopmode
     
-    - name: Create builds directory
+    - name: Create build info
       run: |
-        mkdir -p builds
-        echo "Created builds directory"
+        echo "Build Information" > builds/BUILD_INFO.txt
+        echo "================" >> builds/BUILD_INFO.txt
+        echo "Commit: ${{ steps.commit.outputs.short_hash }}" >> builds/BUILD_INFO.txt
+        echo "Build Number: ${{ steps.commit.outputs.count }}" >> builds/BUILD_INFO.txt
+        echo "Date: $(date)" >> builds/BUILD_INFO.txt
+        echo "Branch: ${{ github.ref_name }}" >> builds/BUILD_INFO.txt
     
-    - name: Copy and version PDFs
+    - name: Move PDFs to builds directory
       run: |
-        if [ -f "2025F_SSW590_11/itManual.pdf" ]; then
-          # Copy with commit hash
-          cp 2025F_SSW590_11/itManual.pdf builds/itManual_${{ steps.commit.outputs.short_hash }}.pdf
+        if [ -f itManual.pdf ]; then
+          cp itManual.pdf builds/itManual-${{ steps.commit.outputs.short_hash }}.pdf
+          cp itManual.pdf builds/itManual-latest.pdf
           
-          # Copy as latest
-          cp 2025F_SSW590_11/itManual.pdf builds/itManual_latest.pdf
-          
-          # Create zipped version
-          cd 2025F_SSW590_11
-          zip ../builds/itManual_${{ steps.commit.outputs.short_hash }}.zip itManual.pdf
+          # Create a zip with the PDF and build info
+          cd builds
+          zip itManual-${{ steps.commit.outputs.short_hash }}.zip \
+              itManual-${{ steps.commit.outputs.short_hash }}.pdf \
+              BUILD_INFO.txt
           cd ..
-          
-          # Create build info
-          echo "Build Date: $(date)" > builds/BUILD_INFO.txt
-          echo "Commit Hash: ${{ steps.commit.outputs.short_hash }}" >> builds/BUILD_INFO.txt
-          echo "Commit Message: ${{ github.event.head_commit.message }}" >> builds/BUILD_INFO.txt
-          
-          echo "✅ PDFs created successfully"
-          ls -lh builds/
         else
-          echo "❌ PDF not found!"
+          echo "Error: PDF was not generated"
           exit 1
         fi
     
@@ -77,7 +67,7 @@ jobs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add builds/
-        git commit -m "📦 Add compiled PDF for commit ${{ steps.commit.outputs.short_hash }} [skip ci]" || echo "No changes to commit"
+        git diff --staged --quiet || git commit -m "📦 Add compiled PDF for commit ${{ steps.commit.outputs.short_hash }}"
         git push
     
     - name: Upload PDF artifacts
