@@ -1,0 +1,113 @@
+\chapter[GitHub Actions]{GitHub Actions \\\small{\textit{-- Charles, Justin, Benedict, Jacky}}}
+\label{Chapter::GitHub Actions}
+\index{Chapter!GitHub Actions}
+
+\section{GitHub Actions Configuration}
+
+\begin{enumerate}
+    \item Using the Overleaf instance and GitHub repository we created in our  \nameref{Chapter::Domain Names} chapter 
+    \item Create a new folder in the project named .github/workflows
+    \item In that folder, create a .yml file which will contain the actions we want to use
+    \item Push this file to the repo 
+    \item Make changes to the Overleaf document and push them to the repository
+    \item Check build status for successful compilation
+\end{enumerate}
+\\
+\textbf{Our yml file}
+\begin{minted}{Bash}
+name: Compile LaTeX Documents
+
+permissions:
+  contents: write  # This allows the action to push changes back
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Get full history for version numbers
+    
+    - name: Get commit info
+      id: commit
+      run: |
+        SHORT_HASH=$(git rev-parse --short HEAD)
+        echo "short_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "count=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+    
+    - name: Create builds directory
+      run: mkdir -p builds
+
+    - name: Update prologue.tex with commit hash
+      run: |
+        sed -i "s/GITHASHHERE/${{ steps.commit.outputs.short_hash }}/g" 2025F_SSW590_11/prologue.tex
+        echo "Updated prologue.tex with commit hash: ${{ steps.commit.outputs.short_hash }}"
+
+    - name: Compile LaTeX document
+      uses: xu-cheng/latex-action@v3
+      with:
+        root_file: itManual.tex
+        working_directory: 2025F_SSW590_11
+        args: -pdf -interaction=nonstopmode -file-line-error -f
+      continue-on-error: true
+    
+    - name: Create build info
+      run: |
+        echo "Build Information" > builds/BUILD_INFO.txt
+        echo "================" >> builds/BUILD_INFO.txt
+        echo "Commit: ${{ steps.commit.outputs.short_hash }}" >> builds/BUILD_INFO.txt
+        echo "Build Number: ${{ steps.commit.outputs.count }}" >> builds/BUILD_INFO.txt
+        echo "Date: $(date)" >> builds/BUILD_INFO.txt
+        echo "Branch: ${{ github.ref_name }}" >> builds/BUILD_INFO.txt
+    
+    - name: Move PDFs to builds directory
+      run: |
+        # Define the source directory
+        LATEX_DIR=2025F_SSW590_11
+        
+        # Check for the file in the correct subdirectory
+        if [ -f $LATEX_DIR/itManual.pdf ]; then
+          
+          # Copy from the correct directory to the builds/ directory in the root
+          cp $LATEX_DIR/itManual.pdf builds/itManual-${{ steps.commit.outputs.short_hash }}.pdf
+          cp $LATEX_DIR/itManual.pdf builds/itManual-latest.pdf
+          
+          # Create a zip with the PDF and build info (CD to builds first)
+          cd builds
+          zip itManual-${{ steps.commit.outputs.short_hash }}.zip \
+              itManual-${{ steps.commit.outputs.short_hash }}.pdf \
+              BUILD_INFO.txt
+          cd ..
+          
+        else
+          echo "Error: PDF was not generated in $LATEX_DIR"
+          exit 1
+        fi 
+    
+    - name: Commit PDFs to repository
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add builds/
+        git diff --staged --quiet || git commit -m "�� Add compiled PDF for commit ${{ steps.commit.outputs.short_hash }}"
+        git push
+    
+    - name: Upload PDF artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: compiled-pdfs-${{ steps.commit.outputs.short_hash }}
+        path: |
+          builds/*.pdf
+          builds/*.zip
+          builds/BUILD_INFO.txt
+        retention-days: 90
+\end{minted}
