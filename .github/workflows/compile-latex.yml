@@ -32,7 +32,7 @@ jobs:
 
     - name: Update prologue.tex with commit hash
       run: |
-        sed -i "s/GIT_HASH_HERE/${{ steps.commit.outputs.short_hash }}/g" 2025F_SSW590_11/prologue.tex
+        sed -i "s/GITHASHHERE/${{ steps.commit.outputs.short_hash }}/g" 2025F_SSW590_11/prologue.tex
         echo "Updated prologue.tex with commit hash: ${{ steps.commit.outputs.short_hash }}"
 
     - name: Compile LaTeX document
@@ -93,3 +93,4 @@ jobs:
           builds/*.zip
           builds/BUILD_INFO.txt
         retention-days: 90
+
