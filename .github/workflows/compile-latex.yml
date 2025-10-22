@@ -22,73 +22,88 @@ jobs:
         FULL_HASH=$(git rev-parse HEAD)
         echo "short_hash=$SHORT_HASH" >> $GITHUB_OUTPUT
         echo "full_hash=$FULL_HASH" >> $GITHUB_OUTPUT
-        echo "Commit Hash: $SHORT_HASH"
+        echo "✓ Commit Hash: $SHORT_HASH"
     
     - name: Update prologue.tex with commit hash
       run: |
         cd 2025F_SSW590_11
-        # Replace GIT_HASH_HERE with actual commit hash in prologue.tex
+        # Replace GIT_HASH_HERE with actual commit hash
         sed -i "s/GIT\\\\_HASH\\\\_HERE/${{ steps.commit.outputs.short_hash }}/g" prologue.tex
         
-        echo "Updated prologue.tex with commit hash: ${{ steps.commit.outputs.short_hash }}"
-        echo "--- Updated prologue.tex content ---"
-        grep "Version:" prologue.tex || echo "Version line not found"
+        echo "✓ Updated prologue.tex with commit hash: ${{ steps.commit.outputs.short_hash }}"
+        grep "Version:" prologue.tex || echo "Note: Version line format may differ"
     
-    - name: Compile LaTeX document (first pass)
+    - name: Compile LaTeX document with latexmk
       uses: xu-cheng/latex-action@v3
       with:
         root_file: itManual.tex
         working_directory: 2025F_SSW590_11
         args: -pdf -interaction=nonstopmode -file-line-error
-    
-    - name: Run BibTeX
-      uses: xu-cheng/latex-action@v3
-      with:
-        root_file: itManual.tex
-        working_directory: 2025F_SSW590_11
-        args: -bibtex
+        latexmk_use_lualatex: false
+        latexmk_use_xelatex: false
+        latexmk_shell_escape: false
+        continue_on_error: false
       continue-on-error: true
     
-    - name: Compile LaTeX document (second pass)
-      uses: xu-cheng/latex-action@v3
-      with:
-        root_file: itManual.tex
-        working_directory: 2025F_SSW590_11
-        args: -pdf -interaction=nonstopmode -file-line-error
-    
-    - name: Compile LaTeX document (third pass for references)
-      uses: xu-cheng/latex-action@v3
-      with:
-        root_file: itManual.tex
-        working_directory: 2025F_SSW590_11
-        args: -pdf -interaction=nonstopmode -file-line-error
-    
-    - name: Create versioned PDF
+    - name: Check if PDF was created
+      id: check_pdf
       run: |
-        cd 2025F_SSW590_11
-        if [ -f itManual.pdf ]; then
-          cp itManual.pdf itManual_${{ steps.commit.outputs.short_hash }}.pdf
-          echo "✓ Created versioned PDF: itManual_${{ steps.commit.outputs.short_hash }}.pdf"
-          ls -lh itManual*.pdf
+        if [ -f "2025F_SSW590_11/itManual.pdf" ]; then
+          echo "pdf_exists=true" >> $GITHUB_OUTPUT
+          echo "✓ PDF successfully created"
+          ls -lh 2025F_SSW590_11/itManual.pdf
         else
-          echo "✗ ERROR: itManual.pdf not found!"
+          echo "pdf_exists=false" >> $GITHUB_OUTPUT
+          echo "✗ PDF was not created"
           exit 1
         fi
     
-    - name: Create builds directory and save PDFs
+    - name: Create versioned PDF
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
+      run: |
+        cd 2025F_SSW590_11
+        cp itManual.pdf itManual_${{ steps.commit.outputs.short_hash }}.pdf
+        echo "✓ Created: itManual_${{ steps.commit.outputs.short_hash }}.pdf"
+    
+    - name: Create builds directory and organize PDFs
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
       run: |
         mkdir -p builds
+        
+        # Copy PDFs to builds directory
         cp 2025F_SSW590_11/itManual.pdf builds/itManual_latest.pdf
         cp 2025F_SSW590_11/itManual_${{ steps.commit.outputs.short_hash }}.pdf builds/
         
-        # Create a zip file with the versioned PDF
+        # Create zip with versioned PDF
         cd 2025F_SSW590_11
         zip ../builds/itManual_${{ steps.commit.outputs.short_hash }}.zip itManual_${{ steps.commit.outputs.short_hash }}.pdf
         
-        echo "✓ PDFs saved to builds/ directory"
+        echo "✓ Files saved to builds/ directory:"
         ls -lh ../builds/
     
-    - name: Upload PDF as artifact
+    - name: Create build info file
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
+      run: |
+        cat > builds/BUILD_INFO.txt << EOF
+        Build Information
+        =================
+        Commit: ${{ steps.commit.outputs.full_hash }}
+        Short Hash: ${{ steps.commit.outputs.short_hash }}
+        Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        Branch: ${{ github.ref_name }}
+        Triggered by: ${{ github.actor }}
+        
+        Files:
+        - itManual_latest.pdf (always newest version)
+        - itManual_${{ steps.commit.outputs.short_hash }}.pdf (versioned)
+        - itManual_${{ steps.commit.outputs.short_hash }}.zip (zipped version)
+        EOF
+        
+        echo "✓ Build info created"
+        cat builds/BUILD_INFO.txt
+    
+    - name: Upload PDF artifacts
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: latex-pdf-${{ steps.commit.outputs.short_hash }}
@@ -96,18 +111,40 @@ jobs:
           builds/itManual_latest.pdf
           builds/itManual_${{ steps.commit.outputs.short_hash }}.pdf
           builds/itManual_${{ steps.commit.outputs.short_hash }}.zip
+          builds/BUILD_INFO.txt
+        retention-days: 90
     
     - name: Commit PDFs back to repository
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         
         git add builds/
         
-        # Only commit if there are changes
         if git diff --staged --quiet; then
-          echo "No changes to commit"
+          echo "ℹ No changes to commit"
         else
           git commit -m "📦 Add compiled PDF for commit ${{ steps.commit.outputs.short_hash }} [skip ci]"
           git push
+          echo "✓ PDFs committed and pushed to repository"
+        fi
+    
+    - name: Generate summary
+      if: always()
+      run: |
+        echo "## LaTeX Compilation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** \`${{ steps.commit.outputs.short_hash }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status:** ${{ steps.check_pdf.outputs.pdf_exists == 'true' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.check_pdf.outputs.pdf_exists }}" == "true" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Generated Files" >> $GITHUB_STEP_SUMMARY
+          echo "- \`itManual_latest.pdf\` - Latest version" >> $GITHUB_STEP_SUMMARY
+          echo "- \`itManual_${{ steps.commit.outputs.short_hash }}.pdf\` - Versioned copy" >> $GITHUB_STEP_SUMMARY
+          echo "- \`itManual_${{ steps.commit.outputs.short_hash }}.zip\` - Zipped version" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 Download artifacts from the **Artifacts** section above" >> $GITHUB_STEP_SUMMARY
         fi
