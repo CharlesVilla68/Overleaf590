@@ -33,7 +33,7 @@ jobs:
       uses: xu-cheng/latex-action@v3
       with:
         root_file: itManual.tex
-        working_directory: .
+        working_directory: 2025F_SSW590_11
         args: -pdf -file-line-error -interaction=nonstopmode
     
     - name: Create build info
@@ -47,20 +47,27 @@ jobs:
     
     - name: Move PDFs to builds directory
       run: |
-        if [ -f itManual.pdf ]; then
-          cp itManual.pdf builds/itManual-${{ steps.commit.outputs.short_hash }}.pdf
-          cp itManual.pdf builds/itManual-latest.pdf
+        # Define the source directory
+        LATEX_DIR=2025F_SSW590_11
+        
+        # Check for the file in the correct subdirectory
+        if [ -f $LATEX_DIR/itManual.pdf ]; then
           
-          # Create a zip with the PDF and build info
+          # Copy from the correct directory to the builds/ directory in the root
+          cp $LATEX_DIR/itManual.pdf builds/itManual-${{ steps.commit.outputs.short_hash }}.pdf
+          cp $LATEX_DIR/itManual.pdf builds/itManual-latest.pdf
+          
+          # Create a zip with the PDF and build info (CD to builds first)
           cd builds
           zip itManual-${{ steps.commit.outputs.short_hash }}.zip \
               itManual-${{ steps.commit.outputs.short_hash }}.pdf \
               BUILD_INFO.txt
           cd ..
+          
         else
-          echo "Error: PDF was not generated"
+          echo "Error: PDF was not generated in $LATEX_DIR"
           exit 1
-        fi
+        fi 
     
     - name: Commit PDFs to repository
       run: |
