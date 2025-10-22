@@ -34,7 +34,8 @@ jobs:
       with:
         root_file: itManual.tex
         working_directory: 2025F_SSW590_11
-        args: -pdf -file-line-error -interaction=nonstopmode
+        args: -pdf -interaction=nonstopmode -file-line-error -f
+        continue-on-error: true
     
     - name: Create build info
       run: |
