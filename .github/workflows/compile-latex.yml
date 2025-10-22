@@ -1,0 +1,113 @@
+name: Compile LaTeX Document
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Get commit hash
+      id: commit
+      run: |
+        SHORT_HASH=$(git rev-parse --short HEAD)
+        FULL_HASH=$(git rev-parse HEAD)
+        echo "short_hash=$SHORT_HASH" >> $GITHUB_OUTPUT
+        echo "full_hash=$FULL_HASH" >> $GITHUB_OUTPUT
+        echo "Commit Hash: $SHORT_HASH"
+    
+    - name: Update prologue.tex with commit hash
+      run: |
+        cd 2025F_SSW590_11
+        # Replace GIT_HASH_HERE with actual commit hash in prologue.tex
+        sed -i "s/GIT\\\\_HASH\\\\_HERE/${{ steps.commit.outputs.short_hash }}/g" prologue.tex
+        
+        echo "Updated prologue.tex with commit hash: ${{ steps.commit.outputs.short_hash }}"
+        echo "--- Updated prologue.tex content ---"
+        grep "Version:" prologue.tex || echo "Version line not found"
+    
+    - name: Compile LaTeX document (first pass)
+      uses: xu-cheng/latex-action@v3
+      with:
+        root_file: itManual.tex
+        working_directory: 2025F_SSW590_11
+        args: -pdf -interaction=nonstopmode -file-line-error
+    
+    - name: Run BibTeX
+      uses: xu-cheng/latex-action@v3
+      with:
+        root_file: itManual.tex
+        working_directory: 2025F_SSW590_11
+        args: -bibtex
+      continue-on-error: true
+    
+    - name: Compile LaTeX document (second pass)
+      uses: xu-cheng/latex-action@v3
+      with:
+        root_file: itManual.tex
+        working_directory: 2025F_SSW590_11
+        args: -pdf -interaction=nonstopmode -file-line-error
+    
+    - name: Compile LaTeX document (third pass for references)
+      uses: xu-cheng/latex-action@v3
+      with:
+        root_file: itManual.tex
+        working_directory: 2025F_SSW590_11
+        args: -pdf -interaction=nonstopmode -file-line-error
+    
+    - name: Create versioned PDF
+      run: |
+        cd 2025F_SSW590_11
+        if [ -f itManual.pdf ]; then
+          cp itManual.pdf itManual_${{ steps.commit.outputs.short_hash }}.pdf
+          echo "✓ Created versioned PDF: itManual_${{ steps.commit.outputs.short_hash }}.pdf"
+          ls -lh itManual*.pdf
+        else
+          echo "✗ ERROR: itManual.pdf not found!"
+          exit 1
+        fi
+    
+    - name: Create builds directory and save PDFs
+      run: |
+        mkdir -p builds
+        cp 2025F_SSW590_11/itManual.pdf builds/itManual_latest.pdf
+        cp 2025F_SSW590_11/itManual_${{ steps.commit.outputs.short_hash }}.pdf builds/
+        
+        # Create a zip file with the versioned PDF
+        cd 2025F_SSW590_11
+        zip ../builds/itManual_${{ steps.commit.outputs.short_hash }}.zip itManual_${{ steps.commit.outputs.short_hash }}.pdf
+        
+        echo "✓ PDFs saved to builds/ directory"
+        ls -lh ../builds/
+    
+    - name: Upload PDF as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: latex-pdf-${{ steps.commit.outputs.short_hash }}
+        path: |
+          builds/itManual_latest.pdf
+          builds/itManual_${{ steps.commit.outputs.short_hash }}.pdf
+          builds/itManual_${{ steps.commit.outputs.short_hash }}.zip
+    
+    - name: Commit PDFs back to repository
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        git add builds/
+        
+        # Only commit if there are changes
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "📦 Add compiled PDF for commit ${{ steps.commit.outputs.short_hash }} [skip ci]"
+          git push
+        fi
