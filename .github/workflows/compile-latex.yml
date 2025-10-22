@@ -23,12 +23,18 @@ jobs:
     - name: Get commit info
       id: commit
       run: |
+        SHORT_HASH=$(git rev-parse --short HEAD)
         echo "short_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
         echo "count=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
     
     - name: Create builds directory
       run: mkdir -p builds
-    
+
+    - name: Update prologue.tex with commit hash
+      run: |
+        sed -i "s/GIT_HASH_HERE/${{ steps.commit.outputs.short_hash }}/g" 2025F_SSW590_11/prologue.tex
+        echo "Updated prologue.tex with commit hash: ${{ steps.commit.outputs.short_hash }}"
+
     - name: Compile LaTeX document
       uses: xu-cheng/latex-action@v3
       with:
